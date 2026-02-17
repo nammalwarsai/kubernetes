@@ -90,6 +90,30 @@ func newPodGroupState() *podGroupState {
 	}
 }
 
+// snapshot returns an immutable point-in-time copy of the current state.
+func (pgs *podGroupState) snapshot() *podGroupState {
+	pgs.lock.RLock()
+	defer pgs.lock.RUnlock()
+
+	allPods := make(map[types.UID]*v1.Pod, len(pgs.allPods))
+	for uid, pod := range pgs.allPods {
+		allPods[uid] = pod
+	}
+
+	var schedulingDeadline *time.Time
+	if pgs.schedulingDeadline != nil {
+		schedulingDeadline = ptr.To(*pgs.schedulingDeadline)
+	}
+
+	return &podGroupState{
+		allPods:            allPods,
+		unscheduledPods:    pgs.unscheduledPods.Clone(),
+		assumedPods:        pgs.assumedPods.Clone(),
+		assignedPods:       pgs.assignedPods.Clone(),
+		schedulingDeadline: schedulingDeadline,
+	}
+}
+
 // addPod adds the pod to this group.
 // Depending on the NodeName, it can insert the pod to assignedPods set.
 func (pgs *podGroupState) addPod(pod *v1.Pod) {
