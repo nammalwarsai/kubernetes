@@ -223,6 +223,37 @@ func TestWorkloadManager_UpdatePod(t *testing.T) {
 	}
 }
 
+func TestWorkloadManager_SnapshotPodGroupStates(t *testing.T) {
+	logger, _ := ktesting.NewTestContext(t)
+
+	manager := New(logger)
+	pod := st.MakePod().Namespace("ns1").Name("p1").UID("p1").
+		WorkloadRef(&v1.WorkloadReference{Name: "w1", PodGroup: "pg1"}).Obj()
+	manager.AddPod(pod)
+
+	manager.SnapshotPodGroupStates()
+
+	state, err := manager.PodGroupState(pod.Namespace, pod.Spec.WorkloadRef)
+	if err != nil {
+		t.Fatalf("Unexpected error getting pod group state: %v", err)
+	}
+	state.AssumePod(pod.UID)
+
+	liveState := manager.podGroupStates[newPodGroupKey(pod.Namespace, pod.Spec.WorkloadRef)]
+	if liveState.AssumedPods().Has(pod.UID) {
+		t.Fatalf("Expected live state to remain unchanged after mutating snapshot state")
+	}
+
+	manager.SnapshotPodGroupStates()
+	state, err = manager.PodGroupState(pod.Namespace, pod.Spec.WorkloadRef)
+	if err != nil {
+		t.Fatalf("Unexpected error getting pod group state: %v", err)
+	}
+	if state.AssumedPods().Has(pod.UID) {
+		t.Fatalf("Expected refreshed snapshot to reflect live state")
+	}
+}
+
 func TestWorkloadManager_DeletePod(t *testing.T) {
 	p1 := st.MakePod().Namespace("ns1").Name("p1").UID("p1").
 		WorkloadRef(&v1.WorkloadReference{Name: "w1", PodGroup: "pg1"}).Obj()

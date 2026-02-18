@@ -39,6 +39,8 @@ type WorkloadManager interface {
 	UpdatePod(oldPod, newPod *v1.Pod)
 	// DeletePod is called by the scheduler when a Pod/Delete event is observed.
 	DeletePod(pod *v1.Pod)
+	// SnapshotPodGroupStates takes a point-in-time snapshot of current pod group states.
+	SnapshotPodGroupStates()
 }
 
 // workloadManager is the concrete implementation of the WorkloadManager.
@@ -47,6 +49,8 @@ type workloadManager struct {
 
 	// podGroupStates stores the runtime state for each known pod group.
 	podGroupStates map[podGroupKey]*podGroupState
+	// podGroupStateSnapshot stores a point-in-time copy of podGroupStates.
+	podGroupStateSnapshot map[podGroupKey]*podGroupState
 
 	logger klog.Logger
 }
@@ -54,8 +58,9 @@ type workloadManager struct {
 // New initializes a new workload manager and returns it.
 func New(logger klog.Logger) *workloadManager {
 	return &workloadManager{
-		podGroupStates: make(map[podGroupKey]*podGroupState),
-		logger:         logger,
+		podGroupStates:        make(map[podGroupKey]*podGroupState),
+		podGroupStateSnapshot: make(map[podGroupKey]*podGroupState),
+		logger:                logger,
 	}
 }
 
@@ -126,9 +131,24 @@ func (wm *workloadManager) PodGroupState(namespace string, workloadRef *v1.Workl
 	wm.lock.RLock()
 	defer wm.lock.RUnlock()
 
-	state, ok := wm.podGroupStates[newPodGroupKey(namespace, workloadRef)]
+	key := newPodGroupKey(namespace, workloadRef)
+	state, ok := wm.podGroupStateSnapshot[key]
+	if !ok {
+		state, ok = wm.podGroupStates[key]
+	}
 	if !ok {
 		return nil, fmt.Errorf("internal pod group state doesn't exist for a pod's workload")
 	}
 	return state, nil
+}
+
+// SnapshotPodGroupStates takes a point-in-time snapshot of all current pod group states.
+func (wm *workloadManager) SnapshotPodGroupStates() {
+	wm.lock.Lock()
+	defer wm.lock.Unlock()
+
+	wm.podGroupStateSnapshot = make(map[podGroupKey]*podGroupState, len(wm.podGroupStates))
+	for key, state := range wm.podGroupStates {
+		wm.podGroupStateSnapshot[key] = state.snapshot()
+	}
 }
